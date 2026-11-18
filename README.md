@@ -1,18 +1,16 @@
-# Cálculo de Tiempo de Arranque de Motores · Streamlit
+# Calculadora de arranque de motores · Streamlit V4
 
-## Publicar en un repositorio nuevo
+Archivos para la raíz de un repositorio GitHub nuevo:
+- `streamlit_app.py`: aplicación principal.
+- `requirements.txt`: dependencias.
+- Excel recomendados en la misma raíz: `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx` y `base_motores.xlsx`.
 
-1. Descomprime el paquete, coloca **los archivos** en la raíz de tu nuevo repositorio de GitHub (no subas el ZIP sin descomprimir).
-2. Copia también desde el repositorio original estos archivos (recomendado, para que nunca dependa de Internet):
-   - `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx`
-   - `base_motores.xlsx` (respaldo de curvas)
-   - `logo.png`, `motor_header.png`, `fondo_motor.png` (opcionales)
-3. Confirma que `streamlit_app.py` y `requirements.txt` quedaron en la raíz.
-4. En Streamlit Community Cloud, despliega `streamlit_app.py` y selecciona **Reboot app** después de cada actualización.
-5. Si todavía falla, abre **Manage app > Logs** y revisa el primer `Traceback` o error de dependencias.
+## Cambios V4
+- El catálogo ya NO se convierte completo en un DataFrame durante el arranque.
+- Búsqueda MLFB por lectura de filas con `openpyxl` en modo `read_only`, solo cuando se pulsa BUSCAR.
+- Botón para detectar hojas cuando el catálogo no usa la hoja predeterminada.
+- Se evita sobrescribir `session_state.factor_mmv` luego de crear su widget.
+- Una excepción Python se muestra dentro de la aplicación para diagnosticarla.
 
-## Importante
-
-Los Excel pueden precargarse si están en el repositorio. Si no están, la app intenta recuperarlos del repositorio público original con un tiempo de espera acotado. También puedes subir y actualizar el Excel desde la interfaz. Si no hay conexión, aparece una advertencia en pantalla en lugar de impedir el inicio.
-
-La evaluación usa el modelo de cálculo heredado de Tkinter, con comprobaciones de torque acelerante y conversiones explícitas. Verifica los resultados contra documentación técnica antes de usarlos para seleccionar equipos.
+## Despliegue
+Sube estos archivos a la raíz y selecciona `streamlit_app.py` en Streamlit Cloud. Agrega ambos Excel a este mismo repositorio para evitar depender de descargas de red. En caso de nuevo error, copia el detalle de excepción y los logs de Streamlit Cloud.

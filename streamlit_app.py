@@ -17,6 +17,7 @@ import re
 import urllib.request
 
 import pandas as pd
+from openpyxl import load_workbook
 import streamlit as st
 from reportlab.lib import colors
 from reportlab.lib.pagesizes import A4
@@ -101,14 +102,14 @@ def display(v: float | None, decimals: int = 5) -> str:
     return f"{v:,.{decimals}f}".rstrip("0").rstrip(".")
 
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=4)
 def workbook_sheets(data: bytes) -> list[str]:
-    return pd.ExcelFile(BytesIO(data), engine="openpyxl").sheet_names
-
-
-@st.cache_data(show_spinner=False)
-def read_sheet(data: bytes, sheet: str, header_row: int) -> pd.DataFrame:
-    return pd.read_excel(BytesIO(data), sheet_name=sheet, header=header_row - 1, engine="openpyxl", dtype=object)
+    """Obtiene nombres sin cargar toda la hoja en memoria."""
+    wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
+    try:
+        return list(wb.sheetnames)
+    finally:
+        wb.close()
 
 
 def read_local(name: str) -> bytes | None:
@@ -119,19 +120,24 @@ def read_local(name: str) -> bytes | None:
         return None
 
 
-def lookup(df: pd.DataFrame, code: str, mapping: dict[str, str]) -> dict[str, Any] | None:
-    ix = col_index(mapping["MLFB"])
-    if ix >= df.shape[1]:
-        raise ValueError(f"La columna MLFB {mapping['MLFB']} no existe en esa hoja ({df.shape[1]} columnas)")
-    found = df.loc[df.iloc[:, ix].map(clean_mlfb) == clean_mlfb(code)]
-    if found.empty:
+def lookup_workbook(data: bytes, sheet: str, header_row: int, code: str,
+                    mapping: dict[str, str]) -> dict[str, Any] | None:
+    """Busca MLFB leyendo por filas: no crea DataFrames gigantes en RAM."""
+    indices = {key: col_index(value) for key, value in mapping.items()}
+    wb = load_workbook(BytesIO(data), read_only=True, data_only=True)
+    try:
+        if sheet not in wb.sheetnames:
+            raise ValueError(f"La hoja {sheet!r} no existe. Hojas: {', '.join(wb.sheetnames)}")
+        ws = wb[sheet]
+        if any(idx >= ws.max_column for idx in indices.values()):
+            raise ValueError("Hay columnas configuradas fuera del rango del Excel")
+        for row_number, row in enumerate(ws.iter_rows(min_row=header_row+1, values_only=True), start=header_row+1):
+            idx = indices['MLFB']
+            if idx < len(row) and clean_mlfb(row[idx]) == clean_mlfb(code):
+                return {'_row':row_number, **{key:(row[idx] if idx<len(row) else None) for key,idx in indices.items()}}
         return None
-    row = found.iloc[0]
-    result = {"_row": int(found.index[0])}
-    for key, letter in mapping.items():
-        idx = col_index(letter)
-        result[key] = row.iloc[idx] if idx < len(row) else None
-    return result
+    finally:
+        wb.close()
 
 
 def infer_rpm(code: str) -> float | None:
@@ -426,16 +432,21 @@ def main() -> None:
     catalog_name=uploaded.name if uploaded is not None else chosen
     if catalog_bytes is None:
         st.warning('No se pudo cargar el catálogo automáticamente. Sube el Excel en «Cambiar / Actualizar archivo Excel» o incorpora los archivos .xlsx al repositorio nuevo. El formulario seguirá disponible.')
-    sheets=[]; df=None
+    sheets=st.session_state.get('sheet_options', ['Core Level Data 60 Hz'])
+    df=None
     with st.expander('⚙️ Columnas, hoja y respaldo de curvas  ·  Mostrar / editar',expanded=False):
         cfg1,cfg2=st.columns([2,1])
         with cfg1:
-            if catalog_bytes:
-                try:
-                    sheets=workbook_sheets(catalog_bytes)
-                except Exception as exc:
-                    st.error(f'Error leyendo las hojas del catálogo: {exc}')
-            sheet_name=st.selectbox('Hoja de datos',sheets if sheets else ['Sin hojas'], index=sheets.index('Core Level Data 60 Hz') if 'Core Level Data 60 Hz' in sheets else 0)
+            if st.button('📚 Detectar hojas del Excel', help='Lee únicamente el índice de hojas, no los datos completos.'):
+                if catalog_bytes:
+                    try:
+                        st.session_state.sheet_options=workbook_sheets(catalog_bytes)
+                        st.rerun()
+                    except Exception as exc:
+                        st.error(f'No se pudieron leer las hojas: {exc}')
+                else:
+                    st.warning('Carga primero un archivo Excel.')
+            sheet_name=st.selectbox('Hoja de datos',sheets, index=sheets.index('Core Level Data 60 Hz') if 'Core Level Data 60 Hz' in sheets else 0)
         with cfg2:
             headers=st.number_input('Fila de encabezados',min_value=1,max_value=100,value=3,step=1)
         grid=st.columns(6)
@@ -448,13 +459,16 @@ def main() -> None:
         st.markdown('**Curvas de respaldo**  ·  Si el Excel nuevo no contiene el factor, consultar base_motores.xlsx por código MLFB')
         uploaded_curves=st.file_uploader('Cambiar archivo de respaldo de curvas',type=['xlsx'],key='backup_file')
         backup_bytes=uploaded_curves.getvalue() if uploaded_curves else (read_local(DEFAULT_BASE) or fetch_optional_catalog(DEFAULT_BASE))
-        if backup_bytes:
-            try:
-                backup_sheets=workbook_sheets(backup_bytes)
-            except Exception:
-                backup_sheets=[]
-        else:
-            backup_sheets=[]
+        backup_sheets=st.session_state.get('backup_sheets', ['Core Level Data 60 Hz'])
+        if st.button('📚 Detectar hojas del respaldo',key='detect_backup'):
+            if backup_bytes:
+                try:
+                    st.session_state.backup_sheets=workbook_sheets(backup_bytes)
+                    st.rerun()
+                except Exception as exc:
+                    st.error(f'Error leyendo hojas de respaldo: {exc}')
+            else:
+                st.warning('No se encontró el Excel de respaldo.')
         bs1,bs2,bs3,bs4=st.columns(4)
         with bs1:
             backup_sheet=st.selectbox('Hoja base de curvas',backup_sheets or ['Sin respaldo'], index=backup_sheets.index('Core Level Data 60 Hz') if 'Core Level Data 60 Hz' in backup_sheets else 0)
@@ -464,22 +478,17 @@ def main() -> None:
             backup_code_col=st.text_input('Columna MLFB respaldo',value='A')
         with bs4:
             backup_curve_col=st.text_input('Columna curva respaldo',value='BT')
-    # Config widgets are always rendered, even while the expander is collapsed.
-    if catalog_bytes and sheets:
-        try:
-            df=read_sheet(catalog_bytes,sheet_name,int(headers))
-        except Exception as exc:
-            st.error(f'No se pudo leer la tabla: {exc}')
+    # No leer la tabla completa durante el arranque ni en cada interacción.
     if catalog_bytes:
-        st.caption(f'📊 Archivo en uso: **{catalog_name}**  ·  Hoja: {sheet_name}  ·  Registros: {len(df) if df is not None else "sin lectura"}')
+        st.caption(f'📊 Archivo seleccionado: **{catalog_name}** · Hoja: {sheet_name} · Lectura bajo demanda al buscar MLFB')
     if search:
         if len(code)!=11:
             st.error('El código MLFB debe tener exactamente 11 caracteres.')
-        elif df is None:
+        elif not catalog_bytes:
             st.error('Primero carga un catálogo válido.')
         else:
             try:
-                record=lookup(df,code,mapping)
+                record=lookup_workbook(catalog_bytes,sheet_name,int(headers),code,mapping)
                 if record is None:
                     st.warning(f'No se encontró el MLFB {code} en {catalog_name}.')
                 else:
@@ -487,8 +496,7 @@ def main() -> None:
                     curve_source=catalog_name
                     if vals['CURVA'] is None and backup_bytes and backup_sheets:
                         try:
-                            base=read_sheet(backup_bytes,backup_sheet,int(backup_header))
-                            curve_rec=lookup(base,code,{'MLFB':backup_code_col,'CURVA':backup_curve_col})
+                            curve_rec=lookup_workbook(backup_bytes,backup_sheet,int(backup_header),code,{'MLFB':backup_code_col,'CURVA':backup_curve_col})
                             if curve_rec:
                                 val=parse_num(curve_rec.get('CURVA'))
                                 if val is not None:
@@ -518,8 +526,9 @@ def main() -> None:
             st.markdown('<div class="field-group">📦 Datos del equipo accionado / Driven Equipment Data</div>',unsafe_allow_html=True)
             st.markdown('**Paso 1. Tipo de equipo**')
             load_type=st.radio('¿Es bomba o ventilador?', ['Bomba o ventilador','Otro equipo'],horizontal=True,key='load_type',disabled=not active)
+            # No modificar el estado del widget aquí: Streamlit puede lanzar una excepción.
             if load_type=='Bomba o ventilador':
-                st.session_state.factor_mmv=0.33
+                st.caption('Factor de carga aplicado automáticamente: 0.33 (valor del formulario original)')
             colfac,facbtn=st.columns([3,1],vertical_alignment='bottom')
             with colfac:
                 factor_mmv=st.number_input('Factor MMV',min_value=0.0,format='%.6f',key='factor_mmv',disabled=not active or load_type=='Bomba o ventilador',help='Para bomba o ventilador el factor es 0.33; otros equipos utilizan el factor manual confirmado.')
@@ -650,4 +659,9 @@ def main() -> None:
     st.caption('Cálculos basados en la lógica del formulario Tkinter original. Confirma las unidades físicas y el catálogo correspondiente antes de usar los resultados para selección de motores.')
 
 if __name__ == '__main__':
-    main()
+    try:
+        main()
+    except Exception:
+        import traceback
+        st.error('Se produjo un error durante la ejecución. Copia el detalle siguiente para diagnosticarlo:')
+        st.code(traceback.format_exc(), language='text')
