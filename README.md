@@ -1,25 +1,18 @@
-# Calculadora de tiempo de arranque de motores | Streamlit
+# Cálculo de Tiempo de Arranque de Motores · Streamlit
 
-## Nuevo repositorio independiente (despliegue sencillo)
+## Publicar en un repositorio nuevo
 
-Sube **todos los archivos de esta carpeta** a la raíz de un nuevo repositorio GitHub. En Streamlit Community Cloud elige `streamlit_app.py` como archivo principal y `main` como rama.
+1. Descomprime el paquete, coloca **los archivos** en la raíz de tu nuevo repositorio de GitHub (no subas el ZIP sin descomprimir).
+2. Copia también desde el repositorio original estos archivos (recomendado, para que nunca dependa de Internet):
+   - `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx`
+   - `base_motores.xlsx` (respaldo de curvas)
+   - `logo.png`, `motor_header.png`, `fondo_motor.png` (opcionales)
+3. Confirma que `streamlit_app.py` y `requirements.txt` quedaron en la raíz.
+4. En Streamlit Community Cloud, despliega `streamlit_app.py` y selecciona **Reboot app** después de cada actualización.
+5. Si todavía falla, abre **Manage app > Logs** y revisa el primer `Traceback` o error de dependencias.
 
-La aplicación intenta descargar al iniciar, si faltan, los catálogos `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx`, `base_motores.xlsx`, `promedios.xlsx` y los gráficos originales del repositorio público de origen. **Esto requiere que dicho repositorio siga siendo público y accesible**. Una vez descargados, se usan como archivos locales del despliegue. Para independizarlo por completo, descarga o copia esos archivos del repositorio anterior y súbelos también al nuevo repositorio.
+## Importante
 
-**Importante:** el catálogo V47-R1 es el predeterminado cuando está disponible; si falla su descarga, se usa `base_motores.xlsx`. El respaldo del factor de curvas funciona por coincidencia MLFB. La carga de archivos Excel desde la interfaz es por sesión, no actualiza GitHub permanentemente.
+Los Excel pueden precargarse si están en el repositorio. Si no están, la app intenta recuperarlos del repositorio público original con un tiempo de espera acotado. También puedes subir y actualizar el Excel desde la interfaz. Si no hay conexión, aparece una advertencia en pantalla en lugar de impedir el inicio.
 
-## Archivos para independencia completa
-
-- `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx` (catálogo reciente)
-- `base_motores.xlsx` (respaldo de curvas)
-- `promedios.xlsx` (datos auxiliares originales)
-- `logo.png`, `motor_header.png`, `fondo_motor.png`, `logo.ico` (imágenes originales)
-
-Se conservaron el formulario por etapas, los campos, la exportación PDF, el comparador MLFB y las fórmulas del código original. Validar unidades y resultados contra documentación técnica antes de su uso operativo.
-
-## Ejecutar localmente
-
-```bash
-pip install -r requirements.txt
-streamlit run streamlit_app.py
-```
+La evaluación usa el modelo de cálculo heredado de Tkinter, con comprobaciones de torque acelerante y conversiones explícitas. Verifica los resultados contra documentación técnica antes de usarlos para seleccionar equipos.

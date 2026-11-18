@@ -42,36 +42,29 @@ MLFB_DESCRIPTIONS = {
 }
 
 
-# Los archivos originales se descargan automáticamente desde el repositorio público
-# de origen cuando aún no están presentes en el repositorio de despliegue.
-SOURCE_ASSETS = (
-    DEFAULT_V47, DEFAULT_BASE, "promedios.xlsx",
-    "logo.png", "motor_header.png", "fondo_motor.png", "logo.ico",
-)
+# Los recursos gráficos son opcionales. No realizamos siete descargas
+# durante el inicio: una falla de red no debe impedir cargar la interfaz.
 SOURCE_REPO_RAW = (
     "https://raw.githubusercontent.com/yahir21547/"
     "CALCULO-DE-TIEMPO-DE-ARRANQUE-STREAMLIT/main/"
 )
 
-@st.cache_resource(show_spinner=False)
-def hydrate_assets() -> tuple[str, ...]:
-    failed = []
-    for name in SOURCE_ASSETS:
-        path = ROOT / name
-        if path.is_file() and path.stat().st_size:
-            continue
-        from urllib.parse import quote
+@st.cache_data(show_spinner=False, ttl=3600)
+def fetch_optional_catalog(name: str) -> bytes | None:
+    """Descarga opcionalmente un Excel, sin bloquear demasiado el arranque."""
+    from urllib.parse import quote
+    if name not in (DEFAULT_V47, DEFAULT_BASE):
+        return None
+    try:
         url = SOURCE_REPO_RAW + quote(name)
-        try:
-            req = urllib.request.Request(url, headers={"User-Agent": "motor-startup-streamlit/2"})
-            with urllib.request.urlopen(req, timeout=30) as response:
-                payload = response.read()
-            if not payload:
-                raise ValueError("Archivo vacío")
-            path.write_bytes(payload)
-        except Exception:
-            failed.append(name)
-    return tuple(failed)
+        req = urllib.request.Request(url, headers={"User-Agent": "Motor-Startup/2"})
+        with urllib.request.urlopen(req, timeout=6) as response:
+            payload = response.read(30_000_000)
+        if len(payload) < 100 or not payload.startswith(b"PK"):
+            return None
+        return payload
+    except (OSError, ValueError, TimeoutError):
+        return None
 
 
 def clean_mlfb(v: Any) -> str:
@@ -399,9 +392,7 @@ def default_value(key: str, value: Any) -> None:
 def main() -> None:
     st.set_page_config(page_title='ABB | Cálculo de tiempo de arranque', page_icon='⚙️', layout='wide', initial_sidebar_state='collapsed')
     theme()
-    unavailable_assets = hydrate_assets()
-    if unavailable_assets:
-        st.warning('No se pudieron descargar automáticamente estos archivos del repositorio original: ' + ', '.join(unavailable_assets) + '. Puedes agregarlos manualmente en la raíz del nuevo repositorio.')
+    # Nunca falla el arranque por archivos remotos ausentes.
     default_value('stage',0)
     default_value('unit_wr2','kgm2')
     default_value('unit_mnv','kgm')
@@ -420,7 +411,9 @@ def main() -> None:
         st.button('↺ REINICIAR TODO',on_click=clear_form,use_container_width=True)
 
     section('📁 CONFIGURACIÓN DE ARCHIVO / FILE CONFIGURATION')
-    available=[n for n in (DEFAULT_V47,DEFAULT_BASE) if (ROOT/n).is_file()]
+    available = [n for n in (DEFAULT_V47, DEFAULT_BASE) if (ROOT/n).is_file()]
+    if not available:
+        available = [DEFAULT_V47, DEFAULT_BASE]
     uploaded=None
     file_cols=st.columns([2.0,1.3,1.3])
     with file_cols[0]:
@@ -429,10 +422,10 @@ def main() -> None:
         uploaded=st.file_uploader('Cambiar / Actualizar archivo Excel',type=['xlsx'],key='file_change')
     with file_cols[2]:
         st.markdown('<div class="small-note" style="padding-top:9px">El Excel incorporado se carga automáticamente. Si subes una versión nueva, se utiliza sin modificar los archivos de GitHub.</div>',unsafe_allow_html=True)
-    catalog_bytes=uploaded.getvalue() if uploaded is not None else read_local(chosen)
+    catalog_bytes = uploaded.getvalue() if uploaded is not None else (read_local(chosen) or fetch_optional_catalog(chosen))
     catalog_name=uploaded.name if uploaded is not None else chosen
     if catalog_bytes is None:
-        st.error('No se encontró un catálogo incorporado. Mantén base_motores.xlsx junto a streamlit_app.py o carga el Excel aquí.')
+        st.warning('No se pudo cargar el catálogo automáticamente. Sube el Excel en «Cambiar / Actualizar archivo Excel» o incorpora los archivos .xlsx al repositorio nuevo. El formulario seguirá disponible.')
     sheets=[]; df=None
     with st.expander('⚙️ Columnas, hoja y respaldo de curvas  ·  Mostrar / editar',expanded=False):
         cfg1,cfg2=st.columns([2,1])
@@ -454,7 +447,7 @@ def main() -> None:
         st.caption('Por defecto: A (MLFB), C (HP), AS (inercia), BT (curva), AN (HOT), AO (COLD). Puedes editar las seis columnas.')
         st.markdown('**Curvas de respaldo**  ·  Si el Excel nuevo no contiene el factor, consultar base_motores.xlsx por código MLFB')
         uploaded_curves=st.file_uploader('Cambiar archivo de respaldo de curvas',type=['xlsx'],key='backup_file')
-        backup_bytes=uploaded_curves.getvalue() if uploaded_curves else read_local(DEFAULT_BASE)
+        backup_bytes=uploaded_curves.getvalue() if uploaded_curves else (read_local(DEFAULT_BASE) or fetch_optional_catalog(DEFAULT_BASE))
         if backup_bytes:
             try:
                 backup_sheets=workbook_sheets(backup_bytes)
