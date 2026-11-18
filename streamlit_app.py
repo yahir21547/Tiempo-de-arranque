@@ -14,6 +14,7 @@ import html
 import math
 import os
 import re
+import urllib.request
 
 import pandas as pd
 import streamlit as st
@@ -39,6 +40,38 @@ MLFB_DESCRIPTIONS = {
     9: {"B": "Shaft 444-445T", "C": "Shaft 447-449T", "D": "Shaft L449T", "A": "Shaft 509-5011", "F": "Shaft 444-445TS", "G": "Shaft 447-449TS"},
     10: {"A": "2 polos", "B": "4 polos", "C": "6 polos", "D": "8 polos"},
 }
+
+
+# Los archivos originales se descargan automáticamente desde el repositorio público
+# de origen cuando aún no están presentes en el repositorio de despliegue.
+SOURCE_ASSETS = (
+    DEFAULT_V47, DEFAULT_BASE, "promedios.xlsx",
+    "logo.png", "motor_header.png", "fondo_motor.png", "logo.ico",
+)
+SOURCE_REPO_RAW = (
+    "https://raw.githubusercontent.com/yahir21547/"
+    "CALCULO-DE-TIEMPO-DE-ARRANQUE-STREAMLIT/main/"
+)
+
+@st.cache_resource(show_spinner=False)
+def hydrate_assets() -> tuple[str, ...]:
+    failed = []
+    for name in SOURCE_ASSETS:
+        path = ROOT / name
+        if path.is_file() and path.stat().st_size:
+            continue
+        from urllib.parse import quote
+        url = SOURCE_REPO_RAW + quote(name)
+        try:
+            req = urllib.request.Request(url, headers={"User-Agent": "motor-startup-streamlit/2"})
+            with urllib.request.urlopen(req, timeout=30) as response:
+                payload = response.read()
+            if not payload:
+                raise ValueError("Archivo vacío")
+            path.write_bytes(payload)
+        except Exception:
+            failed.append(name)
+    return tuple(failed)
 
 
 def clean_mlfb(v: Any) -> str:
@@ -249,218 +282,379 @@ def build_pdf(code: str, result: Calculation, catalog: str, curve_source: str) -
         story.append(Paragraph(f"<b>{html.escape(label)}:</b> {html.escape(formula)} = {display(value, 6)}", styles["SubMotor"]))
     story.append(Spacer(1, 12))
     story.append(Paragraph("Nota: estimación mediante la fórmula y criterios del aplicativo original. Verificar unidades, curvas y datos de placa antes de decisiones de ingeniería.", styles["SubMotor"]))
-    pdf.build(story)
+    def decorate(canvas, doc):
+        canvas.saveState()
+        # Recursos gráficos del aplicativo original, cuando están en GitHub.
+        for filename, x, w, h in (("logo.png", 35, 63, 28), ("motor_header.png", 492, 62, 28)):
+            image_path = ROOT / filename
+            if image_path.is_file():
+                try:
+                    canvas.drawImage(str(image_path), x, 798, width=w, height=h,
+                                     preserveAspectRatio=True, mask="auto", anchor="c")
+                except Exception:
+                    pass
+        canvas.setStrokeColor(colors.HexColor("#E12B32"))
+        canvas.setLineWidth(2)
+        canvas.line(35, 790, 560, 790)
+        canvas.setFont("Helvetica", 7)
+        canvas.setFillColor(colors.HexColor("#64748B"))
+        canvas.drawCentredString(297.5, 22, f"Reporte de tiempo de arranque · Página {doc.page}")
+        canvas.restoreState()
+    pdf.build(story, onFirstPage=decorate, onLaterPages=decorate)
     return out.getvalue()
 
 
+
+# -----------------------------------------------------------------------------
+# Original Tkinter layout adapted to Streamlit, without changing calculation core.
+# -----------------------------------------------------------------------------
+
 def theme() -> None:
-    st.markdown('''<style>
-    .stApp {background: #f6f8fb; color: #1b2838;}
-    .block-container {max-width: 1260px; padding-top: 2rem; padding-bottom: 3rem;}
-    [data-testid="stMetric"] {background: white; border: 1px solid #e1e7ee; border-radius: 14px; padding: 18px;}
-    h1,h2,h3 {letter-spacing: -.035em;}
-    h1 {font-size: 2.3rem !important;}
-    [data-testid="stSidebar"] {background: #ffffff;}
-    .hero {border-radius:18px; padding:25px 29px; background:linear-gradient(110deg,#152337,#263c54); color:#fff; margin-bottom: 24px;}
-    .hero h1 {color: #fff !important; margin: 0 0 7px;}
-    .hero p {color:#cbd7e4; margin:0;}
-    .tag {display:inline-block; color:#fecaca; font-size:12px; font-weight:700; margin-bottom:9px; letter-spacing:.07em;}
-    div.stButton > button[kind="primary"] {background:#d92332; border-color:#d92332;}
-    </style>''', unsafe_allow_html=True)
+    st.markdown("""<style>
+    :root { color-scheme: dark; }
+    [data-testid="stAppViewContainer"], .stApp {background:#10151d;color:#f0f4fa;}
+    [data-testid="stHeader"] {background:#10151d;}
+    [data-testid="stSidebar"] {background:#19212b;border-right:1px solid #344150;}
+    .block-container {max-width:1580px;padding-top:1.1rem;padding-bottom:3rem;}
+    h1,h2,h3,p,label,small {color:#eef3fa;}
+    .app-banner {background:linear-gradient(115deg,#202c3b,#141d29 67%,#311c25); border:1px solid #3d4a5c;
+                 border-left:6px solid #ec1e24;border-radius:13px;padding:17px 22px;margin-bottom:12px;}
+    .app-banner h1 {font-size:1.75rem!important;color:#fff;margin:0;font-weight:850;}
+    .app-banner p {color:#cbd5e1;margin:6px 0 0;font-size:.93rem;}
+    .section-bar {background:#273343;border:1px solid #415165;border-left:5px solid #ee262e;
+        border-radius:9px;padding:8px 13px;margin:16px 0 10px;font-weight:800;color:#fff;letter-spacing:.02em;}
+    .small-note {color:#bdc9d8;font-size:.83rem;line-height:1.45;}
+    .step-line {background:#1d2936;border-radius:8px;padding:9px 12px;color:#e0eaf5;border:1px solid #394a5c;margin:6px 0;}
+    .step-ok {border-color:#36775e;background:#163128;color:#baffd5;}
+    .unit-pill {display:inline-block;background:#35465b;color:#fff;padding:3px 9px;border-radius:6px;font-size:.8rem;}
+    div[data-testid="stVerticalBlockBorderWrapper"] > div {background:#19232f;border-color:#394b60 !important;}
+    div[data-testid="stTextInput"] input, div[data-testid="stNumberInput"] input,
+    div[data-baseweb="select"] > div {background:#253243 !important;color:#f5f8ff !important;border:1px solid #51647a!important;}
+    div[data-testid="stTextInput"] input:disabled, div[data-testid="stNumberInput"] input:disabled {opacity:.78;color:#bacada!important;background:#26313e!important;}
+    div[data-testid="stNumberInput"] input:focus, div[data-testid="stTextInput"] input:focus {border-color:#ff6066!important;}
+    [data-testid="stWidgetLabel"] p {color:#edf4ff!important;font-weight:670;font-size:.89rem;}
+    [data-testid="stMetric"] {background:#253242;border:1px solid #4d6076;border-radius:11px;padding:14px;}
+    [data-testid="stMetricLabel"] p {color:#d7e2ee!important;}
+    [data-testid="stMetricValue"] {color:#fff;}
+    div.stButton > button {background:#2b3b4e;color:#fff;border:1px solid #6b7c8d;font-weight:700;}
+    div.stButton > button:hover {border-color:#ff545c;color:#fff;background:#384b60;}
+    div.stButton > button[kind="primary"], div.stDownloadButton > button[kind="primary"] {
+      background:#dd262c;color:#fff;border:1px solid #ff585e;font-weight:850;}
+    div.stButton > button:disabled {background:#27313e!important;color:#8a9bad!important;border-color:#344252!important;}
+    [data-testid="stAlert"] {border-radius:10px;}
+    [data-testid="stExpander"] {border:1px solid #475c75;border-radius:10px;background:#1b2836;}
+    [data-testid="stTabs"] button {color:#d4dce7;font-weight:700;}
+    .field-group {color:#edf6ff;font-size:1.06rem;font-weight:800;border-bottom:1px solid #46586a;padding:5px 0 10px;margin:0 0 9px;}
+    </style>""", unsafe_allow_html=True)
+
+
+def section(label: str) -> None:
+    st.markdown(f'<div class="section-bar">{html.escape(label)}</div>', unsafe_allow_html=True)
+
+
+def positive_state(key: str) -> bool:
+    try:
+        return float(st.session_state.get(key, 0)) > 0
+    except (TypeError, ValueError):
+        return False
+
+
+def jump_step(n: int) -> None:
+    st.session_state.stage = max(int(st.session_state.get('stage', 0)), n)
+
+
+def clear_form() -> None:
+    # The widget values are cleared before the next Streamlit rerun.
+    for key in ('mlfb', 'hp', 'motor_rpm', 'jm', 'factor_mmm', 'hot', 'cold',
+                'eq_rpm', 'load_wr2', 'load_mnv', 'factor_mmv', 'load_type'):
+        st.session_state.pop(key, None)
+    for key in ('motor', 'calc', 'calc_code', 'calc_curve', 'calc_catalog'):
+        st.session_state.pop(key, None)
+    st.session_state.stage = 0
+
+
+def set_motor(rec: dict[str, Any], code: str, catalog: str, curve_source: str) -> None:
+    st.session_state.motor = {'code':code, 'data':rec, 'curve_source':curve_source,'catalog':catalog}
+    st.session_state.hp = float(rec.get('HP') or 0)
+    st.session_state.motor_rpm = float(infer_rpm(code) or 0)
+    st.session_state.jm = float((rec.get('INERCIA') or 0) / 23.73)
+    st.session_state.factor_mmm = float((rec.get('CURVA') or 0) / 100)
+    st.session_state.hot = float(rec.get('HOT') or 0)
+    st.session_state.cold = float(rec.get('COLD') or 0)
+    for k in ('eq_rpm', 'load_wr2', 'load_mnv'):
+        st.session_state[k] = 0.0
+    st.session_state.factor_mmv = 0.33
+    st.session_state.load_type = 'Bomba o ventilador'
+    st.session_state.unit_wr2 = 'kgm2'
+    st.session_state.unit_mnv = 'kgm'
+    st.session_state.stage = 1
+    st.session_state.pop('calc',None)
+
+
+def default_value(key: str, value: Any) -> None:
+    if key not in st.session_state:
+        st.session_state[key] = value
 
 
 def main() -> None:
-    st.set_page_config(page_title="Motor Start-up Studio", page_icon="⚙️", layout="wide", initial_sidebar_state="expanded")
+    st.set_page_config(page_title='ABB | Cálculo de tiempo de arranque', page_icon='⚙️', layout='wide', initial_sidebar_state='collapsed')
     theme()
-    st.markdown('<section class="hero"><span class="tag">MOTOR ENGINEERING TOOLS</span><h1>⚙️ Motor Start-up Studio</h1><p>Cálculo de arranque NEMA · Catálogos MLFB actualizables · Reportes técnicos</p></section>', unsafe_allow_html=True)
+    unavailable_assets = hydrate_assets()
+    if unavailable_assets:
+        st.warning('No se pudieron descargar automáticamente estos archivos del repositorio original: ' + ', '.join(unavailable_assets) + '. Puedes agregarlos manualmente en la raíz del nuevo repositorio.')
+    default_value('stage',0)
+    default_value('unit_wr2','kgm2')
+    default_value('unit_mnv','kgm')
+    default_value('load_type','Bomba o ventilador')
+    default_value('factor_mmv',0.33)
+    for key in ('eq_rpm','load_wr2','load_mnv','hp','jm','motor_rpm','factor_mmm','hot','cold'):
+        default_value(key,0.0)
+    st.markdown('<div class="app-banner"><h1>⚙️ Plataforma de Cálculos de Motores</h1><p>Motor Calculations Platform &nbsp; · &nbsp; Cálculo de Tiempo de Arranque / Start-up Time Calculation</p></div>',unsafe_allow_html=True)
+    section('🔍 BUSCAR POR CÓDIGO MLFB / SEARCH BY MLFB CODE')
+    aa,bb,cc=st.columns([2.2,1.2,1.4],vertical_alignment='bottom')
+    with aa:
+        code=clean_mlfb(st.text_input('Código MLFB (11 caracteres)', key='mlfb', placeholder='Ej. 1LE...'))
+    with bb:
+        search=st.button('🔎 BUSCAR MOTOR',use_container_width=True,type='primary')
+    with cc:
+        st.button('↺ REINICIAR TODO',on_click=clear_form,use_container_width=True)
 
-    with st.sidebar:
-        st.header("📁 Catálogo de motores")
-        available = [n for n in (DEFAULT_V47, DEFAULT_BASE) if (ROOT / n).is_file()]
-        if available:
-            default_name = available[0]
-            selected = st.selectbox("Archivo base", available, help="V47-R1 tiene prioridad cuando existe en el repositorio.")
-            catalog_bytes = read_local(selected)
-            catalog_name = selected
-        else:
-            catalog_bytes, catalog_name = None, "Sin catálogo integrado"
-        upload = st.file_uploader("Actualizar catálogo Excel", type=["xlsx"], key="catalog_upload", help="El archivo subido tiene prioridad durante esta sesión. No altera el repositorio.")
-        if upload is not None:
-            catalog_bytes, catalog_name = upload.getvalue(), upload.name
-        if catalog_bytes is None:
-            st.warning("Sube el catálogo Excel para habilitar la búsqueda MLFB.")
-        else:
-            st.caption(f"En uso: {catalog_name}")
-        st.markdown("#### Configuración de lectura")
-        headers = st.number_input("Fila de encabezados", min_value=1, max_value=30, value=3, step=1)
-        sheet_name = None
-        data = None
-        if catalog_bytes:
-            try:
-                sheets = workbook_sheets(catalog_bytes)
-                initial = sheets.index("Core Level Data 60 Hz") if "Core Level Data 60 Hz" in sheets else 0
-                sheet_name = st.selectbox("Hoja Excel", sheets, index=initial)
-                data = read_sheet(catalog_bytes, sheet_name, int(headers))
-                st.caption(f"{len(data):,} filas · {data.shape[1]} columnas")
-            except Exception as exc:
-                st.error(f"No se pudo abrir este Excel: {exc}")
-        with st.expander("Columnas (letras Excel)", expanded=False):
-            mapping = {k: st.text_input(k, value=v, max_chars=3, key=f"map_{k}").strip().upper() for k, v in COLUMN_DEFAULTS.items()}
-        st.markdown("#### Factores de curvas")
-        st.caption("Si el catálogo actual no tiene curva, se busca en base_motores.xlsx por MLFB. Nunca se generan promedios ficticios.")
-        backup_upload = st.file_uploader("Base de curvas adicional (opcional)", type=["xlsx"], key="curves_upload")
-        backup_bytes = backup_upload.getvalue() if backup_upload else read_local(DEFAULT_BASE)
-        backup_sheet = "Core Level Data 60 Hz"
-        backup_map = dict(COLUMN_DEFAULTS)
-        with st.expander("Configuración de la base de curvas"):
-            if backup_bytes:
+    section('📁 CONFIGURACIÓN DE ARCHIVO / FILE CONFIGURATION')
+    available=[n for n in (DEFAULT_V47,DEFAULT_BASE) if (ROOT/n).is_file()]
+    uploaded=None
+    file_cols=st.columns([2.0,1.3,1.3])
+    with file_cols[0]:
+        chosen=st.selectbox('Archivo Excel incorporado',available or ['Sin Excel incorporado'],help='Selecciona el mismo archivo de catálogo utilizado por la aplicación original; puedes sustituirlo por otro')
+    with file_cols[1]:
+        uploaded=st.file_uploader('Cambiar / Actualizar archivo Excel',type=['xlsx'],key='file_change')
+    with file_cols[2]:
+        st.markdown('<div class="small-note" style="padding-top:9px">El Excel incorporado se carga automáticamente. Si subes una versión nueva, se utiliza sin modificar los archivos de GitHub.</div>',unsafe_allow_html=True)
+    catalog_bytes=uploaded.getvalue() if uploaded is not None else read_local(chosen)
+    catalog_name=uploaded.name if uploaded is not None else chosen
+    if catalog_bytes is None:
+        st.error('No se encontró un catálogo incorporado. Mantén base_motores.xlsx junto a streamlit_app.py o carga el Excel aquí.')
+    sheets=[]; df=None
+    with st.expander('⚙️ Columnas, hoja y respaldo de curvas  ·  Mostrar / editar',expanded=False):
+        cfg1,cfg2=st.columns([2,1])
+        with cfg1:
+            if catalog_bytes:
                 try:
-                    bsheets = workbook_sheets(backup_bytes)
-                    backup_sheet = st.selectbox("Hoja de curvas", bsheets, index=bsheets.index(backup_sheet) if backup_sheet in bsheets else 0)
+                    sheets=workbook_sheets(catalog_bytes)
                 except Exception as exc:
-                    st.warning(f"No se pudo leer la base de respaldo: {exc}")
-            backup_header = st.number_input("Fila de encabezados de curvas", min_value=1, max_value=30, value=3)
-            backup_map["MLFB"] = st.text_input("Columna MLFB de respaldo", value="A").strip().upper()
-            backup_map["CURVA"] = st.text_input("Columna factor de curva de respaldo", value="BT").strip().upper()
+                    st.error(f'Error leyendo las hojas del catálogo: {exc}')
+            sheet_name=st.selectbox('Hoja de datos',sheets if sheets else ['Sin hojas'], index=sheets.index('Core Level Data 60 Hz') if 'Core Level Data 60 Hz' in sheets else 0)
+        with cfg2:
+            headers=st.number_input('Fila de encabezados',min_value=1,max_value=100,value=3,step=1)
+        grid=st.columns(6)
+        mapping={}
+        label={'MLFB':'MLFB','HP':'HP','INERCIA':'Inercia','CURVA':'Curvas','HOT':'Stall HOT','COLD':'Stall COLD'}
+        for i,(k,v) in enumerate(COLUMN_DEFAULTS.items()):
+            with grid[i]:
+                mapping[k]=st.text_input(f'Columna {label[k]}',value=v,key=f'column_{k}').strip().upper()
+        st.caption('Por defecto: A (MLFB), C (HP), AS (inercia), BT (curva), AN (HOT), AO (COLD). Puedes editar las seis columnas.')
+        st.markdown('**Curvas de respaldo**  ·  Si el Excel nuevo no contiene el factor, consultar base_motores.xlsx por código MLFB')
+        uploaded_curves=st.file_uploader('Cambiar archivo de respaldo de curvas',type=['xlsx'],key='backup_file')
+        backup_bytes=uploaded_curves.getvalue() if uploaded_curves else read_local(DEFAULT_BASE)
+        if backup_bytes:
+            try:
+                backup_sheets=workbook_sheets(backup_bytes)
+            except Exception:
+                backup_sheets=[]
+        else:
+            backup_sheets=[]
+        bs1,bs2,bs3,bs4=st.columns(4)
+        with bs1:
+            backup_sheet=st.selectbox('Hoja base de curvas',backup_sheets or ['Sin respaldo'], index=backup_sheets.index('Core Level Data 60 Hz') if 'Core Level Data 60 Hz' in backup_sheets else 0)
+        with bs2:
+            backup_header=st.number_input('Fila encabezado respaldo',min_value=1,max_value=100,value=3)
+        with bs3:
+            backup_code_col=st.text_input('Columna MLFB respaldo',value='A')
+        with bs4:
+            backup_curve_col=st.text_input('Columna curva respaldo',value='BT')
+    # Config widgets are always rendered, even while the expander is collapsed.
+    if catalog_bytes and sheets:
+        try:
+            df=read_sheet(catalog_bytes,sheet_name,int(headers))
+        except Exception as exc:
+            st.error(f'No se pudo leer la tabla: {exc}')
+    if catalog_bytes:
+        st.caption(f'📊 Archivo en uso: **{catalog_name}**  ·  Hoja: {sheet_name}  ·  Registros: {len(df) if df is not None else "sin lectura"}')
+    if search:
+        if len(code)!=11:
+            st.error('El código MLFB debe tener exactamente 11 caracteres.')
+        elif df is None:
+            st.error('Primero carga un catálogo válido.')
+        else:
+            try:
+                record=lookup(df,code,mapping)
+                if record is None:
+                    st.warning(f'No se encontró el MLFB {code} en {catalog_name}.')
+                else:
+                    vals={k:parse_num(record.get(k)) for k in ('HP','INERCIA','CURVA','HOT','COLD')}
+                    curve_source=catalog_name
+                    if vals['CURVA'] is None and backup_bytes and backup_sheets:
+                        try:
+                            base=read_sheet(backup_bytes,backup_sheet,int(backup_header))
+                            curve_rec=lookup(base,code,{'MLFB':backup_code_col,'CURVA':backup_curve_col})
+                            if curve_rec:
+                                val=parse_num(curve_rec.get('CURVA'))
+                                if val is not None:
+                                    vals['CURVA']=val
+                                    curve_source=(uploaded_curves.name if uploaded_curves else DEFAULT_BASE)
+                        except Exception as exc:
+                            st.warning(f'No fue posible leer la curva de respaldo: {exc}')
+                    set_motor(vals,code,catalog_name,curve_source)
+                    st.success(f'✔ Motor encontrado: {code} · Datos cargados · Factor curva: {curve_source}')
+            except Exception as exc:
+                st.error(f'Error buscando motor: {exc}')
+    motor=st.session_state.get('motor',{})
+    if motor:
+        source=motor.get('curve_source','')
+        if st.session_state.get('factor_mmm',0)==0:
+            st.warning('Este MLFB no tiene un factor de curva numérico. Puedes capturarlo manualmente en Datos del Motor.')
+        st.markdown(f'<div class="step-line step-ok">✔ MLFB <b>{html.escape(motor["code"])}</b> cargado. Archivo: {html.escape(motor["catalog"])} · Curva: {html.escape(source)}</div>',unsafe_allow_html=True)
+    else:
+        st.info('Empieza buscando un código MLFB. Después se habilitará el ingreso paso a paso, como en el programa de escritorio.')
 
-    tab_calc, tab_mlfb, tab_guide = st.tabs(["🧮 Cálculo de arranque", "🔎 Comparador MLFB", "📘 Guía y fuentes"])
-    with tab_mlfb:
-        st.subheader("Comparación de códigos MLFB")
-        c1, c2 = st.columns(2)
-        with c1: m1 = st.text_input("MLFB 1", key="compare1")
-        with c2: m2 = st.text_input("MLFB 2", key="compare2")
-        if m1.strip() and m2.strip():
-            a, b = clean_mlfb(m1), clean_mlfb(m2)
-            changes = []
-            for i in range(max(len(a), len(b))):
-                aa = a[i] if i < len(a) else "∅"
-                bb = b[i] if i < len(b) else "∅"
-                if aa != bb:
-                    changes.append({"Posición": i + 1, "MLFB 1": aa, "Descripción 1": MLFB_DESCRIPTIONS.get(i + 1, {}).get(aa, "Sin descripción"),
-                                    "MLFB 2": bb, "Descripción 2": MLFB_DESCRIPTIONS.get(i + 1, {}).get(bb, "Sin descripción")})
-            if changes: st.dataframe(pd.DataFrame(changes), hide_index=True, use_container_width=True)
-            else: st.success("Ambos códigos son iguales.")
-        st.caption("Decodificador posicional heredado del comparador original. Las descripciones dependen de la familia de producto y deben contrastarse con el catálogo.")
-    with tab_guide:
-        st.subheader("Cómo actualizar el Excel")
-        st.markdown("""1. En la barra izquierda, **Actualizar catálogo Excel** permite subir una versión nueva (incluida V47-R1). Se utiliza de inmediato durante la sesión actual.
-2. Ajusta la **hoja**, **fila de encabezados** y las **letras de columna** si la estructura del libro cambió.
-3. Si la nueva versión no trae factores de curva, sube **base_motores.xlsx** como respaldo y configura sus columnas. Solo se reutilizan curvas con coincidencia exacta de MLFB.
-4. Para que el catálogo sea permanente para todos los usuarios, sube el `.xlsx` al repositorio de GitHub. El aplicativo detecta automáticamente V47-R1 cuando está junto a `streamlit_app.py`.
+    section('⚙️ DATOS DEL MOTOR Y DEL EQUIPO ACCIONADO')
+    frame_eq,frame_motor=st.columns(2,gap='large')
+    stage=int(st.session_state.stage)
+    active=bool(motor)
+    with frame_eq:
+        with st.container(border=True):
+            st.markdown('<div class="field-group">📦 Datos del equipo accionado / Driven Equipment Data</div>',unsafe_allow_html=True)
+            st.markdown('**Paso 1. Tipo de equipo**')
+            load_type=st.radio('¿Es bomba o ventilador?', ['Bomba o ventilador','Otro equipo'],horizontal=True,key='load_type',disabled=not active)
+            if load_type=='Bomba o ventilador':
+                st.session_state.factor_mmv=0.33
+            colfac,facbtn=st.columns([3,1],vertical_alignment='bottom')
+            with colfac:
+                factor_mmv=st.number_input('Factor MMV',min_value=0.0,format='%.6f',key='factor_mmv',disabled=not active or load_type=='Bomba o ventilador',help='Para bomba o ventilador el factor es 0.33; otros equipos utilizan el factor manual confirmado.')
+            with facbtn:
+                st.button('✔ Validar',key='next_type',disabled=not active or (load_type!='Bomba o ventilador' and factor_mmv<=0),on_click=jump_step,args=(2,),use_container_width=True)
+            st.markdown('**Paso 2. Velocidad del equipo**')
+            rpm_col,rpm_btn=st.columns([3,1],vertical_alignment='bottom')
+            with rpm_col:
+                eq_rpm=st.number_input('RPM (Equipo)',min_value=0.0,step=1.0,format='%.2f',key='eq_rpm',disabled=stage<2)
+            with rpm_btn:
+                st.button('✔ Siguiente',key='next_rpm',disabled=stage<2 or not positive_state('eq_rpm'),on_click=jump_step,args=(3,),use_container_width=True)
+            st.markdown('**Paso 3. Momento de inercia**')
+            wi,wunit,wbtn=st.columns([2.8,1.3,1.3],vertical_alignment='bottom')
+            with wi:
+                wr2=st.number_input('WR²',min_value=0.0,format='%.6f',key='load_wr2',disabled=stage<3)
+            with wunit:
+                unit_wr2=st.selectbox('Unidad WR²',['kgm2','lbft2'],key='unit_wr2',disabled=stage<3)
+            with wbtn:
+                st.button('✔ Siguiente',key='next_wr2',disabled=stage<3 or not positive_state('load_wr2'),on_click=jump_step,args=(4,),use_container_width=True)
+            st.markdown('**Paso 4. Momento nominal de la carga**')
+            mi,munit,mbtn=st.columns([2.8,1.3,1.3],vertical_alignment='bottom')
+            with mi:
+                mnv_raw=st.number_input('MNV',min_value=0.0,format='%.6f',key='load_mnv',disabled=stage<4)
+            with munit:
+                unit_mnv=st.selectbox('Unidad MNV',['kgm','lbft'],key='unit_mnv',disabled=stage<4)
+            with mbtn:
+                st.button('✔ Siguiente',key='next_mnv',disabled=stage<4 or not positive_state('load_mnv'),on_click=jump_step,args=(5,),use_container_width=True)
+            st.markdown('**Adaptaciones de la carga**')
+            with st.container(border=True):
+                if st.session_state.get('calc'):
+                    cv=st.session_state.calc.values
+                    for left,right,unit in [('MMV','MMV','kgf·m'),('JV','JV','kg·m²')]:
+                        a,b=st.columns([1,2]);a.markdown(f'**{left}:**');b.markdown(f'`{display(cv[right],7)} {unit}`')
+                else:
+                    st.caption('MMV y JV se rellenan automáticamente al calcular, como en la versión Tkinter.')
+    with frame_motor:
+        with st.container(border=True):
+            st.markdown('<div class="field-group">⚙️ Datos del motor / Motor Data</div>',unsafe_allow_html=True)
+            st.number_input('HP (Motor)',min_value=0.0,key='hp',format='%.4f',disabled=not active)
+            st.number_input('RPM (Motor)',min_value=0.0,key='motor_rpm',format='%.2f',disabled=not active,help='Se precarga la RPM inferida desde el MLFB; es editable para usar RPM nominal de placa.')
+            st.number_input('JM · Inercia del rotor (kg·m²)',min_value=0.0,key='jm',format='%.7f',disabled=not active)
+            st.number_input('Factor MMM · Curva del motor (fracción)',min_value=0.0,key='factor_mmm',format='%.7f',disabled=not active,help='Valor BT del Excel dividido entre 100, igual que en el original.')
+            hot_a,cold_a=st.columns(2)
+            with hot_a:
+                st.number_input('Stall Time HOT (seg)',min_value=0.0,key='hot',format='%.3f',disabled=not active)
+            with cold_a:
+                st.number_input('Stall Time COLD (seg)',min_value=0.0,key='cold',format='%.3f',disabled=not active)
+            st.markdown('**Valores del motor calculados automáticamente**')
+            with st.container(border=True):
+                if active and positive_state('motor_rpm') and positive_state('hp'):
+                    mnm=float(st.session_state.hp)*726.15/float(st.session_state.motor_rpm)
+                    gd2m=float(st.session_state.jm)*4
+                    mmm=mnm*float(st.session_state.factor_mmm)
+                    for label,value,unit in [('MNM',mnm,'kgf·m'),('GD²M',gd2m,'kg·m²'),('MMM',mmm,'kgf·m')]:
+                        a,b=st.columns([1,2]);a.markdown(f'**{label}:**');b.markdown(f'`{display(value,7)} {unit}`')
+                else:
+                    st.caption('MNM, GD²M y MMM estarán disponibles después de buscar un motor.')
 
-**Importante:** la carga temporal desde Streamlit no escribe cambios en GitHub. La aplicación nunca usa valores de curva inventados, y cuando falta el factor exige capturarlo manualmente.
-
-**Convenciones:** se reproduce la fórmula original de arranque y el redondeo intermedio original. La conversión de entrada es `lb·ft² / 23.731 = kg·m²` y `lb·ft / 7.233 = kgf·m` según el programa de escritorio. Las etiquetas del PDF reflejan el valor original y el normalizado por separado. Verifica la convención física exacta `WR²/GD²` con tu documentación técnica.""")
-    with tab_calc:
-        st.subheader("01 · Selección del motor")
-        col1, col2 = st.columns([2, 1])
-        with col1:
-            code = clean_mlfb(st.text_input("Código MLFB", placeholder="Introduce los 11 caracteres del motor"))
-        with col2:
-            search = st.button("Buscar motor en catálogo", type="primary", use_container_width=True)
-        if search:
-            if len(code) != 11:
-                st.error("El MLFB debe tener 11 caracteres alfanuméricos.")
-            elif data is None:
-                st.error("No hay un catálogo Excel válido cargado.")
+    section('📈 ADAPTACIONES / ADAPTATIONS')
+    v=st.session_state.get('calc')
+    labels=[('MMV nMot.','MMV_NMOT','kgf·m'),('GD²V','GD2V','kg·m²'),('GD²V nMot.','GD2V_NMOT','kg·m²'),('nGD²','NGD2','kg·m²'),('ta','TA','seg'),('ta CEILING','TA_CEIL','seg')]
+    cols=st.columns(6)
+    for col,(title,k,u) in zip(cols,labels):
+        col.metric(title, f'{display(v.values[k],3)} {u}' if v else '—')
+    btn1,btn2,btn3=st.columns([2,1,1],vertical_alignment='bottom')
+    with btn1:
+        do_calc=st.button('⚡ CALCULAR TIEMPO DE ARRANQUE',type='primary',use_container_width=True,disabled=stage<5 or not active)
+    with btn2:
+        if st.button('↻ Volver a paso 1',use_container_width=True,disabled=not active):
+            st.session_state.stage=1;st.session_state.pop('calc',None);st.rerun()
+    with btn3:
+        st.caption(f'Paso {min(stage,5)} de 5 · Secuencia guiada')
+    if do_calc:
+        try:
+            raw_wr2=float(st.session_state.load_wr2)
+            raw_mnv=float(st.session_state.load_mnv)
+            ui=st.session_state.unit_wr2
+            ut=st.session_state.unit_mnv
+            calc=calculate(hp=float(st.session_state.hp),motor_rpm=float(st.session_state.motor_rpm),
+                motor_inertia=float(st.session_state.jm),motor_factor=float(st.session_state.factor_mmm),
+                eq_rpm=float(st.session_state.eq_rpm),
+                load_inertia=raw_wr2/23.731 if ui=='lbft2' else raw_wr2,
+                load_torque=raw_mnv/7.233 if ut=='lbft' else raw_mnv,
+                load_factor=0.33 if st.session_state.load_type=='Bomba o ventilador' else float(st.session_state.factor_mmv),
+                hot=float(st.session_state.hot) or None,cold=float(st.session_state.cold) or None,
+                raw_wr2=raw_wr2,wr2_unit='lb·ft²' if ui=='lbft2' else 'kg·m²',
+                raw_mnv=raw_mnv,mnv_unit='lb·ft' if ut=='lbft' else 'kgf·m')
+            st.session_state.calc=calc
+            st.session_state.calc_code=motor.get('code',code)
+            st.session_state.calc_curve=motor.get('curve_source','Manual')
+            st.session_state.calc_catalog=catalog_name
+            st.rerun()
+        except Exception as exc:
+            st.session_state.pop('calc',None)
+            st.error(f'No se pudo realizar el cálculo: {exc}')
+    if v:
+        if v.status=='Apto HOT y COLD':st.success(f'✔ {v.status}. {v.status_detail}')
+        elif v.status=='No apto':st.error(f'✖ {v.status}. {v.status_detail}')
+        else:st.warning(f'{v.status}. {v.status_detail}')
+        st.markdown(f'<div class="step-line step-ok">Conversión comprobable: WR² ingresado = <b>{display(v.raw_wr2,6)} {html.escape(v.wr2_unit)}</b> → JV calculado = <b>{display(v.values["JV"],7)} kg·m²</b>. El PDF muestra ambos valores con sus respectivas unidades.</div>',unsafe_allow_html=True)
+        op,report=st.columns([2,1])
+        with op:
+            with st.expander('📋 Operaciones utilizadas / Debug',expanded=False):
+                st.dataframe(pd.DataFrame(v.trace,columns=['Variable','Operación','Resultado']),hide_index=True,use_container_width=True)
+        with report:
+            try:
+                data_pdf=build_pdf(st.session_state.calc_code,v,st.session_state.calc_catalog,st.session_state.calc_curve)
+                st.download_button('📄 EXPORTAR PDF',data=data_pdf,file_name=f'{st.session_state.calc_code} - {datetime.now():%d-%m-%Y}.pdf',mime='application/pdf',type='primary',use_container_width=True)
+            except Exception as exc:
+                st.error(f'No se pudo generar el PDF: {exc}')
+    section('🔎 HERRAMIENTAS ADICIONALES')
+    with st.expander('Comparador de MLFB / MLFB Comparator',expanded=False):
+        co1,co2=st.columns(2)
+        with co1:m1=st.text_input('MLFB 1',key='compare_1')
+        with co2:m2=st.text_input('MLFB 2',key='compare_2')
+        if st.button('Comparar MLFB',key='compare_btn'):
+            a,b=clean_mlfb(m1),clean_mlfb(m2)
+            if not a or not b:st.error('Ambos códigos deben estar llenos.')
             else:
-                try:
-                    rec = lookup(data, code, mapping)
-                    if rec is None:
-                        st.error(f"No se encontró {code} en {catalog_name}.")
-                    else:
-                        vals = {k: parse_num(rec.get(k)) for k in ("HP", "INERCIA", "CURVA", "HOT", "COLD")}
-                        source = "Catálogo activo"
-                        if vals["CURVA"] is None and backup_bytes:
-                            try:
-                                back = read_sheet(backup_bytes, backup_sheet, int(backup_header))
-                                match = lookup(back, code, backup_map)
-                                if match is not None and parse_num(match.get("CURVA")) is not None:
-                                    vals["CURVA"] = parse_num(match["CURVA"])
-                                    source = f"Respaldo: {backup_upload.name if backup_upload else DEFAULT_BASE}"
-                            except Exception as exc:
-                                st.warning(f"No fue posible consultar las curvas de respaldo: {exc}")
-                        st.session_state["motor"] = {"code": code, "data": vals, "curve_source": source, "catalog": catalog_name}
-                        st.session_state.pop("calc", None)
-                        st.success(f"Motor {code} localizado. Datos y curva: {source}.")
-                except Exception as exc:
-                    st.error(f"No se pudo buscar el motor: {exc}")
-        motor = st.session_state.get("motor", {})
-        mv = motor.get("data", {})
-        if motor:
-            if motor["code"] != code and code:
-                st.info(f"Datos cargados para {motor['code']}. Pulsa Buscar para sustituirlos.")
-            if mv.get("CURVA") is None:
-                st.warning("El catálogo no tiene un factor de curva numérico para este MLFB y no se encontró en el respaldo. Captúralo manualmente en el formulario.")
-            st.caption(f"Fuente: {motor.get('catalog')} · Curva: {motor.get('curve_source')}")
-        st.subheader("02 · Datos de operación")
-        with st.form("motor_form"):
-            left, right = st.columns(2, gap="large")
-            with left:
-                st.markdown("#### Motor seleccionado")
-                hp = st.number_input("Potencia del motor (HP)", min_value=0.0, value=float(mv.get("HP") or 0.0), step=1.0, format="%.4f")
-                rpm_default = infer_rpm(motor.get("code", "")) or 0.0
-                motor_rpm = st.number_input("Velocidad del motor (rpm)", min_value=0.0, value=float(rpm_default), step=1.0, format="%.2f", help="La velocidad sugerida desde el MLFB es sincrónica de referencia, no necesariamente la velocidad nominal de placa.")
-                inertia_lbft2 = mv.get("INERCIA")
-                inertia_default = float(inertia_lbft2 / 23.73) if inertia_lbft2 is not None else 0.0
-                motor_inertia = st.number_input("Inercia del rotor JM (kg·m²)", min_value=0.0, value=inertia_default, format="%.7f", help="Conversión del valor AS del catálogo: / 23.73, igual que la app original.")
-                curve_default = (float(mv["CURVA"]) / 100.0) if mv.get("CURVA") is not None else 0.0
-                motor_factor = st.number_input("Factor de torque medio del motor (fracción)", min_value=0.0, value=curve_default, format="%.6f", help="Valor Excel BT / 100. Si la curva faltaba, introduce aquí el factor confirmado.")
-                hot = st.number_input("Stall Time HOT (segundos; 0 = no disponible)", min_value=0.0, value=float(mv.get("HOT") or 0), format="%.3f")
-                cold = st.number_input("Stall Time COLD (segundos; 0 = no disponible)", min_value=0.0, value=float(mv.get("COLD") or 0), format="%.3f")
-            with right:
-                st.markdown("#### Equipo accionado")
-                eq_rpm = st.number_input("RPM del equipo accionado", min_value=0.0, value=0.0, step=1.0)
-                u_wr2 = st.selectbox("Unidad de inercia introducida", ["lb·ft²", "kg·m²"], index=0)
-                raw_wr2 = st.number_input(f"Inercia del equipo ({u_wr2})", min_value=0.0, value=0.0, format="%.6f")
-                u_mnv = st.selectbox("Unidad de torque introducido", ["kgf·m", "lb·ft"], index=0)
-                raw_mnv = st.number_input(f"Torque nominal de la carga ({u_mnv})", min_value=0.0, value=0.0, format="%.6f")
-                is_fan = st.checkbox("Es bomba o ventilador (factor MMV = 0.33)", value=True)
-                manual_factor = st.number_input("Factor MMV (fracción)", min_value=0.0, value=0.33, format="%.6f", disabled=is_fan)
-                st.caption("La interfaz conserva tus valores originales. El cálculo opera con unidades normalizadas.")
-            submitted = st.form_submit_button("⚡ Calcular tiempo de arranque", type="primary", use_container_width=True)
-        if submitted:
-            load_inertia = raw_wr2 / 23.731 if u_wr2 == "lb·ft²" else raw_wr2
-            load_torque = raw_mnv / 7.233 if u_mnv == "lb·ft" else raw_mnv
-            try:
-                calc = calculate(hp=hp, motor_rpm=motor_rpm, motor_inertia=motor_inertia,
-                                 motor_factor=motor_factor, eq_rpm=eq_rpm, load_inertia=load_inertia,
-                                 load_torque=load_torque, load_factor=0.33 if is_fan else manual_factor,
-                                 hot=hot or None, cold=cold or None,
-                                 raw_wr2=raw_wr2, wr2_unit=u_wr2, raw_mnv=raw_mnv, mnv_unit=u_mnv)
-                st.session_state["calc"] = calc
-                st.session_state["calc_code"] = motor.get("code", code)
-                st.session_state["calc_catalog"] = motor.get("catalog", catalog_name)
-                st.session_state["calc_curve"] = motor.get("curve_source", "Introducido manualmente")
-            except ValueError as exc:
-                st.session_state.pop("calc", None)
-                st.error(str(exc))
-        result = st.session_state.get("calc")
-        if result:
-            v = result.values
-            st.subheader("03 · Resultado de ingeniería")
-            c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Tiempo de arranque", f"{v['TA']:.2f} s")
-            c2.metric("Tiempo CEILING", f"{v['TA_CEIL']:.0f} s")
-            c3.metric("Torque medio motor", f"{display(v['MMM'], 2)} kgf·m")
-            c4.metric("Inercia equivalente", f"{display(v['NGD2'], 2)} kg·m²")
-            if result.status == "Apto HOT y COLD": st.success(f"✅ {result.status}. {result.status_detail}")
-            elif result.status in ("No apto",): st.error(f"⛔ {result.status}. {result.status_detail}")
-            else: st.warning(f"ℹ️ {result.status}. {result.status_detail}")
-            with st.expander("Ver conversiones, variables y operaciones", expanded=False):
-                st.info(f"Inercia: {display(result.raw_wr2, 6)} {result.wr2_unit} → {display(v['JV'], 7)} kg·m².  Torque: {display(result.raw_mnv, 6)} {result.mnv_unit} → {display(v['MNV'], 7)} kgf·m.")
-                st.dataframe(pd.DataFrame(result.trace, columns=["Variable", "Operación", "Valor"]), use_container_width=True, hide_index=True)
-            try:
-                pdf_bytes = build_pdf(st.session_state.get("calc_code", ""), result, st.session_state.get("calc_catalog", "Manual"), st.session_state.get("calc_curve", "Manual"))
-                st.download_button("📄 Descargar reporte PDF", data=pdf_bytes,
-                                   file_name=f"arranque_{st.session_state.get('calc_code','manual')}_{datetime.now():%Y%m%d}.pdf",
-                                   mime="application/pdf", type="primary")
-            except Exception as exc:
-                st.error(f"No se pudo construir el reporte PDF: {exc}")
-            if st.button("Limpiar resultados"):
-                st.session_state.pop("calc", None)
-                st.rerun()
+                rows=[]
+                for i in range(max(len(a),len(b))):
+                    x=a[i] if i<len(a) else '(vacío)';y=b[i] if i<len(b) else '(vacío)'
+                    if x!=y:
+                        rows.append({'Posición':i+1,'MLFB 1':x,'Significado 1':MLFB_DESCRIPTIONS.get(i+1,{}).get(x,'Sin descripción'),
+                            'MLFB 2':y,'Significado 2':MLFB_DESCRIPTIONS.get(i+1,{}).get(y,'Sin descripción')})
+                if rows:st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
+                else:st.success('Los códigos son iguales.')
+    st.caption('Cálculos basados en la lógica del formulario Tkinter original. Confirma las unidades físicas y el catálogo correspondiente antes de usar los resultados para selección de motores.')
 
-
-if __name__ == "__main__":
+if __name__ == '__main__':
     main()

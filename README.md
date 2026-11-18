@@ -1,26 +1,25 @@
-# Motor Start-up Studio (Streamlit)
+# Calculadora de tiempo de arranque de motores | Streamlit
 
-Nueva interfaz web para la calculadora original de tiempo de arranque de motores.
+## Nuevo repositorio independiente (despliegue sencillo)
 
-## Despliegue en Streamlit Community Cloud
+Sube **todos los archivos de esta carpeta** a la raíz de un nuevo repositorio GitHub. En Streamlit Community Cloud elige `streamlit_app.py` como archivo principal y `main` como rama.
 
-1. Sube `streamlit_app.py` y `requirements.txt` a la rama `main` del repositorio de GitHub.
-2. Mantén `base_motores.xlsx` en la raíz para conservar las curvas existentes. Si tienes `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx`, súbelo a la misma carpeta para convertirlo en el catálogo predeterminado.
-3. En Streamlit Community Cloud: **Create app** → selecciona el repositorio y la rama `main` → entrypoint `streamlit_app.py`.
-4. También puedes cargar un Excel nuevo desde la barra lateral, sin necesidad de desplegar de nuevo. El archivo subido solo existe en la sesión en curso.
+La aplicación intenta descargar al iniciar, si faltan, los catálogos `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx`, `base_motores.xlsx`, `promedios.xlsx` y los gráficos originales del repositorio público de origen. **Esto requiere que dicho repositorio siga siendo público y accesible**. Una vez descargados, se usan como archivos locales del despliegue. Para independizarlo por completo, descarga o copia esos archivos del repositorio anterior y súbelos también al nuevo repositorio.
 
-Para uso local: `pip install -r requirements.txt` seguido de `streamlit run streamlit_app.py`.
+**Importante:** el catálogo V47-R1 es el predeterminado cuando está disponible; si falla su descarga, se usa `base_motores.xlsx`. El respaldo del factor de curvas funciona por coincidencia MLFB. La carga de archivos Excel desde la interfaz es por sesión, no actualiza GitHub permanentemente.
 
-## Tratamiento de curvas
+## Archivos para independencia completa
 
-La aplicación usa el factor en la columna BT del catálogo activo dividido entre 100, conforme al código original. Cuando el factor no existe, intenta localizarlo en `base_motores.xlsx` por coincidencia exacta del MLFB. No calcula promedios nuevos, no infiere factores ausentes y deja el campo editable si no hay curva.
+- `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx` (catálogo reciente)
+- `base_motores.xlsx` (respaldo de curvas)
+- `promedios.xlsx` (datos auxiliares originales)
+- `logo.png`, `motor_header.png`, `fondo_motor.png`, `logo.ico` (imágenes originales)
 
-**La estructura exacta del V47-R1 no se ha verificado:** selecciona en la barra lateral el nombre de hoja, fila de encabezados y letras de columnas apropiadas si la versión nueva no conserva el esquema original.
+Se conservaron el formulario por etapas, los campos, la exportación PDF, el comparador MLFB y las fórmulas del código original. Validar unidades y resultados contra documentación técnica antes de su uso operativo.
 
-## Importante: unidades
+## Ejecutar localmente
 
-La interfaz muestra por separado las entradas y sus valores normalizados, también en el PDF. Se conservaron los factores de conversión del programa original: `lb·ft² / 23.731 → kg·m²` y `lb·ft / 7.233 → kgf·m`. Se mantuvo asimismo el algoritmo de `GD² = 4 × J`, los redondeos intermedios y la ecuación de tiempo de arranque. Es necesario confirmar con una referencia de ingeniería qué representa exactamente el campo `WR²` (momento de inercia J o convención WR²/GD²).
-
-## Estado
-
-El código se ha comprobado sintácticamente y las principales fórmulas pueden verificarse sin interfaz. La aplicación visual completa y los datos contenidos en los Excel no han sido validados aquí.
+```bash
+pip install -r requirements.txt
+streamlit run streamlit_app.py
+```
