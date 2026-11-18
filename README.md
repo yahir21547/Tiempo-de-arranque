@@ -1,16 +1,17 @@
-# Calculadora de arranque de motores · Streamlit V4
+# Calculadora de Tiempo de Arranque · Streamlit V6
 
-Archivos para la raíz de un repositorio GitHub nuevo:
-- `streamlit_app.py`: aplicación principal.
-- `requirements.txt`: dependencias.
-- Excel recomendados en la misma raíz: `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx` y `base_motores.xlsx`.
+## Arranque sin cargar archivos
 
-## Cambios V4
-- El catálogo ya NO se convierte completo en un DataFrame durante el arranque.
-- Búsqueda MLFB por lectura de filas con `openpyxl` en modo `read_only`, solo cuando se pulsa BUSCAR.
-- Botón para detectar hojas cuando el catálogo no usa la hoja predeterminada.
-- Se evita sobrescribir `session_state.factor_mmv` luego de crear su widget.
-- Una excepción Python se muestra dentro de la aplicación para diagnosticarla.
+Coloca `streamlit_app.py`, `requirements.txt` y estos Excel **en la raíz del repositorio nuevo** (no dentro de carpetas):
 
-## Despliegue
-Sube estos archivos a la raíz y selecciona `streamlit_app.py` en Streamlit Cloud. Agrega ambos Excel a este mismo repositorio para evitar depender de descargas de red. En caso de nuevo error, copia el detalle de excepción y los logs de Streamlit Cloud.
+- `PMD NEMA FS 56 to FS 500 - V47-R1.xlsx` (catálogo predeterminado)
+- `base_motores.xlsx` (respaldo de curvas)
+
+Los puedes descargar desde el repositorio anterior:
+
+- https://github.com/yahir21547/CALCULO-DE-TIEMPO-DE-ARRANQUE-STREAMLIT/blob/main/PMD%20NEMA%20FS%2056%20to%20FS%20500%20-%20V47-R1.xlsx
+- https://github.com/yahir21547/CALCULO-DE-TIEMPO-DE-ARRANQUE-STREAMLIT/blob/main/base_motores.xlsx
+
+La aplicación selecciona automáticamente el V47-R1 y solo ofrece la carga de archivos nuevos como función opcional. Si los Excel todavía no se han copiado, intentará leerlos del repositorio anterior, pero no conviene depender de internet para operar la app. **Este ZIP no incluye los dos archivos binarios Excel**.
+
+En Streamlit Community Cloud usa `streamlit_app.py` como punto de entrada.

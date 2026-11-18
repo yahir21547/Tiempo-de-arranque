@@ -29,19 +29,6 @@ ROOT = Path(__file__).parent
 DEFAULT_V47 = "PMD NEMA FS 56 to FS 500 - V47-R1.xlsx"
 DEFAULT_BASE = "base_motores.xlsx"
 COLUMN_DEFAULTS = {"MLFB": "A", "HP": "C", "INERCIA": "AS", "CURVA": "BT", "HOT": "AN", "COLD": "AO"}
-MLFB_DESCRIPTIONS = {
-    1: {"1": "Motor Series: Standard or Definite Purpose"},
-    2: {"L": "Standard GP/SD", "P": "Definite Purpose"},
-    3: {"E": "Standard GP/SD", "C": "Definite Purpose"},
-    4: {"4": "SD200", "6": "Next Gen NEMA"},
-    5: {"3": "SD200", "5": "DP200 HPS"},
-    6: {"2": "Eficiencia estándar"},
-    7: {"1": "Tipo básico", "2": "Tipo mejorado"},
-    8: {"4": "Frame 444-449", "5": "Frame 5000s"},
-    9: {"B": "Shaft 444-445T", "C": "Shaft 447-449T", "D": "Shaft L449T", "A": "Shaft 509-5011", "F": "Shaft 444-445TS", "G": "Shaft 447-449TS"},
-    10: {"A": "2 polos", "B": "4 polos", "C": "6 polos", "D": "8 polos"},
-}
-
 
 # Los recursos gráficos son opcionales. No realizamos siete descargas
 # durante el inicio: una falla de red no debe impedir cargar la interfaz.
@@ -182,7 +169,14 @@ def calculate(*, hp: float, motor_rpm: float, motor_inertia: float, motor_factor
     ngd2 = gd2m + gd2v_motor
     accelerating_torque = mmm - mmv_motor
     if accelerating_torque <= 0:
-        raise ValueError("El torque medio del motor no supera al torque de carga referido. No existe un tiempo de arranque positivo válido con esta aproximación.")
+        raise ValueError(
+            f"Torque acelerante insuficiente: MMM = {mmm:.3f} kgf·m, "
+            f"MMV referido = {mmv_motor:.3f} kgf·m; "
+            f"diferencia = {accelerating_torque:.3f} kgf·m. "
+            "Verifica el factor MMM obtenido del Excel, la unidad de MNV, "
+            "el factor de la carga y las RPM. El programa no puede calcular "
+            "un tiempo positivo con estos datos."
+        )
     ta_raw = ngd2 * motor_rpm / (375 * accelerating_torque)
     if not math.isfinite(ta_raw) or ta_raw < 0:
         raise ValueError("Tiempo de arranque inválido; comprueba los valores de entrada.")
@@ -417,21 +411,27 @@ def main() -> None:
         st.button('↺ REINICIAR TODO',on_click=clear_form,use_container_width=True)
 
     section('📁 CONFIGURACIÓN DE ARCHIVO / FILE CONFIGURATION')
-    available = [n for n in (DEFAULT_V47, DEFAULT_BASE) if (ROOT/n).is_file()]
+    # El catálogo integrado tiene prioridad y no exige ninguna carga del usuario.
+    # La subida manual es una opción secundaria para actualizar versiones.
+    available = [n for n in (DEFAULT_V47, DEFAULT_BASE) if (ROOT / n).is_file()]
     if not available:
         available = [DEFAULT_V47, DEFAULT_BASE]
-    uploaded=None
-    file_cols=st.columns([2.0,1.3,1.3])
-    with file_cols[0]:
-        chosen=st.selectbox('Archivo Excel incorporado',available or ['Sin Excel incorporado'],help='Selecciona el mismo archivo de catálogo utilizado por la aplicación original; puedes sustituirlo por otro')
-    with file_cols[1]:
-        uploaded=st.file_uploader('Cambiar / Actualizar archivo Excel',type=['xlsx'],key='file_change')
-    with file_cols[2]:
-        st.markdown('<div class="small-note" style="padding-top:9px">El Excel incorporado se carga automáticamente. Si subes una versión nueva, se utiliza sin modificar los archivos de GitHub.</div>',unsafe_allow_html=True)
-    catalog_bytes = uploaded.getvalue() if uploaded is not None else (read_local(chosen) or fetch_optional_catalog(chosen))
-    catalog_name=uploaded.name if uploaded is not None else chosen
-    if catalog_bytes is None:
-        st.warning('No se pudo cargar el catálogo automáticamente. Sube el Excel en «Cambiar / Actualizar archivo Excel» o incorpora los archivos .xlsx al repositorio nuevo. El formulario seguirá disponible.')
+    chosen = st.selectbox(
+        'Catálogo predeterminado', available,
+        help='El catálogo se utiliza automáticamente. No necesitas subirlo cada vez.',
+    )
+    local_catalog = read_local(chosen)
+    source = 'repositorio actual' if local_catalog is not None else 'repositorio original (descarga opcional)'
+    remote_catalog = None if local_catalog is not None else fetch_optional_catalog(chosen)
+    with st.expander('🔄 Actualizar o sustituir el archivo Excel (opcional)', expanded=False):
+        st.caption('Solo usa esta opción cuando tengas una versión más reciente del catálogo. No es necesaria para calcular con el archivo integrado.')
+        uploaded = st.file_uploader('Seleccionar Excel nuevo', type=['xlsx'], key='file_change')
+    catalog_bytes = uploaded.getvalue() if uploaded is not None else (local_catalog or remote_catalog)
+    catalog_name = uploaded.name if uploaded is not None else chosen
+    if catalog_bytes is not None:
+        st.success(f'✅ Catálogo listo: {catalog_name} · Fuente: {"archivo actualizado por ti" if uploaded is not None else source}. No necesitas cargar ningún archivo.')
+    else:
+        st.error('No se encontró el catálogo predeterminado. En GitHub, sube el archivo «PMD NEMA FS 56 to FS 500 - V47-R1.xlsx» a la misma carpeta de streamlit_app.py. Mientras tanto puedes actualizarlo desde la opción desplegable.')
     sheets=st.session_state.get('sheet_options', ['Core Level Data 60 Hz'])
     df=None
     with st.expander('⚙️ Columnas, hoja y respaldo de curvas  ·  Mostrar / editar',expanded=False):
@@ -601,6 +601,26 @@ def main() -> None:
             st.session_state.stage=1;st.session_state.pop('calc',None);st.rerun()
     with btn3:
         st.caption(f'Paso {min(stage,5)} de 5 · Secuencia guiada')
+    if active and stage >= 5:
+        try:
+            hp_v = float(st.session_state.hp)
+            rpm_m = float(st.session_state.motor_rpm)
+            rpm_e = float(st.session_state.eq_rpm)
+            factor_motor = float(st.session_state.factor_mmm)
+            torque_raw = float(st.session_state.load_mnv)
+            torque_load = torque_raw / 7.233 if st.session_state.unit_mnv == 'lbft' else torque_raw
+            factor_load = 0.33 if st.session_state.load_type == 'Bomba o ventilador' else float(st.session_state.factor_mmv)
+            if rpm_m > 0 and rpm_e > 0:
+                t_motor = hp_v * 726.15 / rpm_m * factor_motor
+                t_load = round(torque_load * factor_load * rpm_e / rpm_m, 2)
+                with st.expander('🧮 Verificación previa de torques (diagnóstico)', expanded=False):
+                    x, y, z = st.columns(3)
+                    x.metric('MMM del motor', f'{t_motor:.3f} kgf·m')
+                    y.metric('MMV referido', f'{t_load:.3f} kgf·m')
+                    z.metric('Torque acelerante', f'{t_motor - t_load:.3f} kgf·m')
+                    st.caption('Para que exista un tiempo de arranque positivo, MMM debe ser mayor que MMV referido. La inercia afecta el tiempo, pero no esta condición.')
+        except (TypeError, ValueError, KeyError, ZeroDivisionError):
+            pass
     if do_calc:
         try:
             raw_wr2=float(st.session_state.load_wr2)
@@ -639,23 +659,6 @@ def main() -> None:
                 st.download_button('📄 EXPORTAR PDF',data=data_pdf,file_name=f'{st.session_state.calc_code} - {datetime.now():%d-%m-%Y}.pdf',mime='application/pdf',type='primary',use_container_width=True)
             except Exception as exc:
                 st.error(f'No se pudo generar el PDF: {exc}')
-    section('🔎 HERRAMIENTAS ADICIONALES')
-    with st.expander('Comparador de MLFB / MLFB Comparator',expanded=False):
-        co1,co2=st.columns(2)
-        with co1:m1=st.text_input('MLFB 1',key='compare_1')
-        with co2:m2=st.text_input('MLFB 2',key='compare_2')
-        if st.button('Comparar MLFB',key='compare_btn'):
-            a,b=clean_mlfb(m1),clean_mlfb(m2)
-            if not a or not b:st.error('Ambos códigos deben estar llenos.')
-            else:
-                rows=[]
-                for i in range(max(len(a),len(b))):
-                    x=a[i] if i<len(a) else '(vacío)';y=b[i] if i<len(b) else '(vacío)'
-                    if x!=y:
-                        rows.append({'Posición':i+1,'MLFB 1':x,'Significado 1':MLFB_DESCRIPTIONS.get(i+1,{}).get(x,'Sin descripción'),
-                            'MLFB 2':y,'Significado 2':MLFB_DESCRIPTIONS.get(i+1,{}).get(y,'Sin descripción')})
-                if rows:st.dataframe(pd.DataFrame(rows),hide_index=True,use_container_width=True)
-                else:st.success('Los códigos son iguales.')
     st.caption('Cálculos basados en la lógica del formulario Tkinter original. Confirma las unidades físicas y el catálogo correspondiente antes de usar los resultados para selección de motores.')
 
 if __name__ == '__main__':
